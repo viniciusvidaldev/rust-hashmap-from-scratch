@@ -33,6 +33,28 @@ impl<K, V> Default for HashMap<K, V> {
     }
 }
 
+impl<K, V> Extend<(K, V)> for HashMap<K, V>
+where
+    K: Hash + Eq,
+{
+    fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iter: I) {
+        for (k, v) in iter {
+            self.insert(k, v);
+        }
+    }
+}
+
+impl<K, V> FromIterator<(K, V)> for HashMap<K, V>
+where
+    K: Hash + Eq,
+{
+    fn from_iter<I: IntoIterator<Item = (K, V)>>(iter: I) -> Self {
+        let mut map = Self::new();
+        map.extend(iter);
+        map
+    }
+}
+
 impl<K, V> HashMap<K, V>
 where
     K: Hash + Eq,
@@ -59,13 +81,13 @@ where
         let bucket = self.bucket(&key).expect("buckets non-empty after resize");
         let bucket = &mut self.buckets[bucket];
 
-        self.len += 1;
         for (k, v) in bucket.iter_mut() {
             if k == &key {
                 return Some(std::mem::replace(v, value));
             }
         }
 
+        self.len += 1;
         bucket.push((key, value));
         None
     }
@@ -192,5 +214,61 @@ mod tests {
         let mut map = HashMap::new();
         map.insert("foo", 42);
         assert!(!map.contains_key(&"bar"));
+    }
+
+    mod extend {
+        use super::*;
+
+        #[test]
+        fn adds_pairs_to_empty_map() {
+            let mut map = HashMap::new();
+            map.extend([("a", 1), ("b", 2)]);
+            assert_eq!(map.get(&"a"), Some(&1));
+            assert_eq!(map.get(&"b"), Some(&2));
+            assert_eq!(map.len(), 2);
+        }
+
+        #[test]
+        fn overwrites_existing_keys() {
+            let mut map = HashMap::new();
+            map.insert("a", 1);
+            map.extend([("a", 99), ("b", 2)]);
+            assert_eq!(map.get(&"a"), Some(&99));
+            assert_eq!(map.get(&"b"), Some(&2));
+            assert_eq!(map.len(), 2);
+        }
+
+        #[test]
+        fn accepts_any_into_iterator() {
+            let mut map = HashMap::new();
+            let pairs = vec![("a", 1), ("b", 2)];
+            map.extend(pairs.into_iter().filter(|(_, v)| *v > 0));
+            assert_eq!(map.len(), 2);
+        }
+    }
+
+    mod from_iterator {
+        use super::*;
+
+        #[test]
+        fn collects_pairs_into_map() {
+            let map: HashMap<&str, i32> = [("a", 1), ("b", 2)].into_iter().collect();
+            assert_eq!(map.get(&"a"), Some(&1));
+            assert_eq!(map.get(&"b"), Some(&2));
+            assert_eq!(map.len(), 2);
+        }
+
+        #[test]
+        fn empty_iterator_yields_empty_map() {
+            let map: HashMap<&str, i32> = std::iter::empty().collect();
+            assert!(map.is_empty());
+        }
+
+        #[test]
+        fn duplicate_keys_keep_last_value() {
+            let map: HashMap<&str, i32> = [("a", 1), ("a", 2), ("a", 3)].into_iter().collect();
+            assert_eq!(map.get(&"a"), Some(&3));
+            assert_eq!(map.len(), 1);
+        }
     }
 }

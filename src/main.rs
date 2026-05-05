@@ -22,7 +22,7 @@ fn main() {
     // entry().or_insert returns a mut ref — useful for "insert if missing,
     // then mutate". Here we bump alice and insert dave with a default.
     *scores.entry("alice").or_insert(0) += 5;
-    *scores.entry("dave").or_insert(0) += 1;
+    *scores.entry("dave").or_default() += 1;
 
     // or_insert_with only runs the closure when the key is absent.
     scores.entry("erin").or_insert_with(|| 100);
