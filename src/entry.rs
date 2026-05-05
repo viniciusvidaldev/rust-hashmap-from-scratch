@@ -2,16 +2,17 @@ use std::hash::Hash;
 
 use crate::map::HashMap;
 
-pub struct OccupiedEntry<'a, K, V> {
+pub struct OccupiedEntry<'a, K: 'a, V: 'a> {
     entry: &'a mut (K, V),
 }
 
-pub struct VacantEntry<'a, K, V> {
+pub struct VacantEntry<'a, K: 'a, V: 'a> {
     key: K,
     bucket: &'a mut Vec<(K, V)>,
+    len: &'a mut usize,
 }
 
-pub enum Entry<'a, K, V> {
+pub enum Entry<'a, K: 'a, V: 'a> {
     Occupied(OccupiedEntry<'a, K, V>),
     Vacant(VacantEntry<'a, K, V>),
 }
@@ -21,53 +22,28 @@ where
     K: Hash + Eq,
 {
     pub fn entry(&mut self, key: K) -> Entry<'_, K, V> {
-        let bucket = self.bucket(&key);
-        let i = self.buckets[bucket].iter().position(|(k, _)| k == &key);
+        if self.buckets.is_empty() || self.len > 3 * self.buckets.len() / 4 {
+            self.resize();
+        }
 
-        match i {
+        let bucket = self
+            .bucket(&key)
+            .expect("buckets non-empty after resize");
+
+        match self.buckets[bucket].iter().position(|(k, _)| k == &key) {
             Some(i) => Entry::Occupied(OccupiedEntry {
                 entry: &mut self.buckets[bucket][i],
             }),
             None => Entry::Vacant(VacantEntry {
                 key,
                 bucket: &mut self.buckets[bucket],
+                len: &mut self.len,
             }),
         }
     }
 }
 
-impl<'a, K, V> Entry<'a, K, V> {
-    pub fn or_insert(self, value: V) -> &'a mut V {
-        match self {
-            Entry::Occupied(e) => &mut e.entry.1,
-            Entry::Vacant(e) => {
-                e.bucket.push((e.key, value));
-                &mut e
-                    .bucket
-                    .last_mut()
-                    .expect("bucket should not be empty after push")
-                    .1
-            }
-        }
-    }
-
-    pub fn or_insert_with(self, f: impl FnOnce() -> V) -> &'a mut V {
-        match self {
-            Entry::Occupied(e) => &mut e.entry.1,
-            Entry::Vacant(e) => {
-                let value = f();
-                e.bucket.push((e.key, value));
-                &mut e
-                    .bucket
-                    .last_mut()
-                    .expect("bucket should not be empty after push")
-                    .1
-            }
-        }
-    }
-}
-
-impl<'a, K, V> OccupiedEntry<'a, K, V> {
+impl<'a, K: 'a, V: 'a> OccupiedEntry<'a, K, V> {
     pub fn get(&self) -> &V {
         &self.entry.1
     }
@@ -77,18 +53,47 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
     }
 }
 
-impl<'a, K, V> VacantEntry<'a, K, V> {
-    pub fn insert(self, value: V) -> &'a mut V {
-        e.bucket.push((e.key, value));
-        let (_, &mut value) = e
-            .bucket
-            .last_mut()
-            .expect("bucket should not be empty after push");
-
-        value
+impl<'a, K: 'a, V: 'a> VacantEntry<'a, K, V> {
+    pub fn insert(self, value: V) -> &'a mut V
+    where
+        K: Hash + Eq,
+    {
+        *self.len += 1;
+        self.bucket.push((self.key, value));
+        &mut self.bucket.last_mut().unwrap().1
     }
+
     pub fn key(&self) -> &K {
         &self.key
+    }
+}
+
+impl<'a, K, V> Entry<'a, K, V>
+where
+    K: Hash + Eq,
+{
+    pub fn or_insert(self, value: V) -> &'a mut V {
+        match self {
+            Entry::Occupied(e) => &mut e.entry.1,
+            Entry::Vacant(e) => e.insert(value),
+        }
+    }
+
+    pub fn or_insert_with<F>(self, maker: F) -> &'a mut V
+    where
+        F: FnOnce() -> V,
+    {
+        match self {
+            Entry::Occupied(e) => &mut e.entry.1,
+            Entry::Vacant(e) => e.insert(maker()),
+        }
+    }
+
+    pub fn or_default(self) -> &'a mut V
+    where
+        V: Default,
+    {
+        self.or_insert_with(Default::default)
     }
 }
 

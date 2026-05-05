@@ -1,10 +1,13 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::{
+    borrow::Borrow,
+    hash::{DefaultHasher, Hash, Hasher},
+};
 
 const INITIAL_NBUCKETS: usize = 1;
 
 pub struct HashMap<K, V> {
     pub(crate) buckets: Vec<Vec<(K, V)>>,
-    len: usize,
+    pub(crate) len: usize,
 }
 
 impl<K, V> HashMap<K, V> {
@@ -24,14 +27,28 @@ impl<K, V> HashMap<K, V> {
     }
 }
 
+impl<K, V> Default for HashMap<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<K, V> HashMap<K, V>
 where
     K: Hash + Eq,
 {
-    pub(crate) fn bucket(&self, key: &K) -> usize {
+    pub(crate) fn bucket<Q>(&self, key: &Q) -> Option<usize>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        if self.buckets.is_empty() {
+            return None;
+        }
+
         let mut hasher = DefaultHasher::new();
         key.hash(&mut hasher);
-        (hasher.finish() % self.buckets.len() as u64) as usize
+        Some((hasher.finish() % self.buckets.len() as u64) as usize)
     }
 
     pub fn insert(&mut self, key: K, value: V) -> Option<V> {
@@ -39,7 +56,7 @@ where
             self.resize();
         }
 
-        let bucket = self.bucket(&key);
+        let bucket = self.bucket(&key).expect("buckets non-empty after resize");
         let bucket = &mut self.buckets[bucket];
 
         self.len += 1;
@@ -53,31 +70,39 @@ where
         None
     }
 
-    pub fn get(&self, key: &K) -> Option<&V> {
-        if self.is_empty() {
-            return None;
-        }
-
-        let bucket = self.bucket(key);
+    pub fn get<Q>(&self, key: &Q) -> Option<&V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let bucket = self.bucket(key)?;
         self.buckets[bucket]
             .iter()
-            .find(|(k, _)| k == key)
+            .find(|(k, _)| k.borrow() == key)
             .map(|(_, v)| v)
     }
 
-    pub fn contains_key(&self, key: &K) -> bool {
+    pub fn contains_key<Q>(&self, key: &Q) -> bool
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
         self.get(key).is_some()
     }
 
-    pub fn remove(&mut self, key: &K) -> Option<V> {
-        let bucket = self.bucket(key);
+    pub fn remove<Q>(&mut self, key: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized,
+    {
+        let bucket = self.bucket(key)?;
         let bucket = &mut self.buckets[bucket];
-        let i = bucket.iter().position(|(k, _)| k == key)?;
+        let i = bucket.iter().position(|(k, _)| k.borrow() == key)?;
         self.len -= 1;
         Some(bucket.swap_remove(i).1)
     }
 
-    fn resize(&mut self) {
+    pub(crate) fn resize(&mut self) {
         let target_size = match self.buckets.len() {
             0 => INITIAL_NBUCKETS,
             n => 2 * n,
